@@ -1,0 +1,707 @@
+OENF-DCI8-8FDR-O8PN-RJOS-L4LS-M777-O6PP-NCPP
+
+1. 	install/uninstall dedupe package
+	1) 	Install the latest NBU.  This will obviously install the AIX Dedupe package as well.
+	2) 	Remove the dedupe package:
+		/opt/pdde/pddeuninstall.sh 	-basedir /usr/openv/pdde 
+									-ostdir  /usr/openv/lib/ost-plugins
+									–forceclean
+	3) 	Install the new dedupe package:
+		${PKG_PATH}/pdinstall	-basedir /usr/openv/pdde 
+								-ostdir /usr/openv/lib/ost-plugins 
+								-pdde_pack_path ${PDDESERVER_PKG_PATH}
+								-pddeagent_pack_path ${PDDEAGENT_PKG_PATH}
+ 
+	4) 	If MSDP has been setup, you need
+		a) 	update /etc/default/pdde
+STORAGE="/Storage"
+		b) 	generate /usr/openv/pdde/pddb/etc/pddb.env
+#!/bin/bash
+PGBASE=/Storage/databases/pddb
+PGDATA=/Storage/databases/pddb/data
+LOGFILE=/Storage/databases/pddb/postgresql.log
+PGOPTS="-N 512 -B 1024 -i"
+PGUSER=pddb
+PGPORT=10085
+PGHOST=${HOSTNAME}
+
+--------------------------------------------------------------------------------
+ 
+2. 	install/uninstall package on AIX
+	1) 	install
+		installp -a -d ${PKG_PATH}/${PKG_NAME}.image
+	2) 	uninstall
+		installp -U ${PKG_NAME}
+	3) 	query
+		lslpp -L ${PKG_NAME}
+		lslpp -f ${PKG_NAME}
+	4) 	oslevel
+		oslevel -rq
+		oslevel -sq
+	5) 	print a specified file belongs to which fileset
+		which_fileset ${FILE_NAME}
+		installp -w ${FILE_NAME}
+
+--------------------------------------------------------------------------------
+ 
+3. 	clean MSDP on UNIX
+	0) 	kill spad/spoold/pddb
+	1) 	rm -rf ${STORAGE}
+	2) 	rm -f /usr/openv/lib/ost-plugins/${HOSTNAME}.cfg
+	3) 	rm -f /etc/pdregistry.cfg
+	4) 	cp /usr/openv/pdde/pdconfigure/cfg/userconfigs/pdregistry.cfg /etc/pdregistry.cfg
+	5) 	/usr/openv/netbackup/bin/admincmd/nbdevconfig -creatests -storage_server ${HOSTNAME} -stype PureDisk -media_server ${HOSTNAME} -st 9
+	6) 	/usr/openv/volmgr/bin/tpconfig -add -storage_server ${HOSTNAME} -stype PureDisk -sts_user_id root -password root
+	7) 	/usr/openv/netbackup/bin/admincmd/nbdevconfig -getconfig -storage_server ${HOSTNAME} -stype PureDisk -configlist a.txt
+	8) 	update a.txt
+	9) 	/usr/openv/netbackup/bin/admincmd/nbdevconfig -setconfig -storage_server ${HOSTNAME} -stype PureDisk -configlist a.txt
+
+--------------------------------------------------------------------------------
+
+4. 	manually backup from command line
+	/usr/openv/netbackup/bin/bpbackup -i -p ${POLICY}
+
+--------------------------------------------------------------------------------
+
+5. 	postgres credentials 
+	export PGPASSWORD=_lkmsf3fwjnkojn5__
+
+--------------------------------------------------------------------------------
+
+6. 	ifstat: watch NIC data transferring
+
+--------------------------------------------------------------------------------
+
+7. 	Status 213: PureDisk Volume is repeatedly being marked down and up automatically. 
+	http://www.symantec.com/business/support/index?page=content&id=TECH156490
+	http://www.symantec.com/docs/TECH156490
+
+--------------------------------------------------------------------------------
+
+8. 	Accelerate replication and importing for AIR(Automated Image Replication) 
+	http://rmnwiki.min.veritas.com/wiki/QE/Denali_DBAgents_FIDs/Automated_Image_Replication_Configuration
+
+	To start backup policies using the replication, simply use the SLP you created on the source master as the storage unit for any policy. There is a touch file you can create that will cause replication and import to happen much quicker than out of the box.
+ 
+	Create a new text file "LIFECYCLE_PARAMETERS" at /usr/openv/netbackup/db/config or C:\program files\veritas\netbackup\db\config\.
+DUPLICATION_SESSION_INTERVAL_MINUTES = 1 
+MAX_MINUTES_TIL_FORCE_SMALL_DUPLICATION_JOB = 1 
+IMPORT_SESSION_TIMER = 1
+
+--------------------------------------------------------------------------------
+
+9.	Auto Image Replication
+	MSDP->MSDP Replication flow
+	1)	impl_open_server
+			open_server
+				pd_mount
+					WSRequestExt: action=gettime
+					read NB_PD_SERVER tag file
+					_pdvfs_get_sdk_version
+						WSRequestExt: action=getSDKVersion
+						_pdvfs_get_sdk_version: Successfully retrieved SDK version: PDSDK_2.0
+		
+	2)	impl_get_lsu_info
+			lsu_get_capacity_info
+				PdvfsVIoctl(PDVFS_IOCTL_GET_CR_STATS)
+					WSRequestExt: action=getStatistics (PDVFS_IOCTL_GET_CR_STATS)
+					pdvfs_lib_log: CAGetStatistics Response:
+			PdvfsGetReplicationTargets
+				WSRequestExt: actiongetReplicationTargets
+				PdvfsGetReplicationTargets: Successfully retrieved  1 replication targets
+			_pdvfs_get_sdk_version
+				WSRequestExt: action=getSDKVersion
+				_pdvfs_get_sdk_version: Successfully retrieved SDK version: PDSDK_2.0
+			PdvfsGetReplicationSources
+				WSRequestExt: action=getReplicationSources
+				PdvfsGetReplicationSources: Successfully retrieved  0 replication sources
+
+	3)	impl_get_image_prop_byname: (<BACKUP_ID>_C1_HDR)
+		impl_get_image_prop_byname: (<BACKUP_ID>_C1_TIR)
+		impl_get_image_prop_byname: (<BACKUP_ID>_C1_F1)
+		impl_get_image_prop_byname: (<BACKUP_ID>_C1_IM)
+		
+	4)	impl_get_lsu_info (same as step 2)
+		impl_get_lsu_replication_prop
+			impl_get_lsu_info (same as step 2)
+			
+	5)	impl_async_copy_image: entry: from_image: <BACKUP_ID>_C1_HDR, to_image: <BACKUP_ID>_C1_HDR
+			async_add_image: entry: source_image: <BACKUP_ID>_C1_HDR
+		impl_async_copy_image: entry: from_image: <BACKUP_ID>_C1_TIR, to_image: <BACKUP_ID>_C1_TIR
+			async_add_image: entry: source_image: <BACKUP_ID>_C1_TIR
+		impl_async_copy_image: entry: from_image: <BACKUP_ID>_C1_F1, to_image: <BACKUP_ID>_C1_F1
+			async_add_image: entry: source_image: <BACKUP_ID>_C1_F1
+		impl_async_copy_image: entry: from_image: <BACKUP_ID>_C1_IM, to_image: <BACKUP_ID>_C1_IM
+			async_add_image: entry: source_image: <BACKUP_ID>_C1_IM	(special process for <BACKUP_ID>_C1_IM image)
+		impl_async_copy_image: Beginning replication.
+			async_air_replicate
+				air_get_replication_targets
+					impl_get_lsu_info
+					impl_get_lsu_replication_prop
+				air_create_event_file: entry: event_path:</<MOUNT_POINT>/2/<client>/<policy>/EVENT_<BACKUP_ID>_<timestamp>.data>
+					WSRequestExt: action=addlist
+					data=@POformatVersion ... <client>/<policy>/EVENT_<BACKUP_ID>_<timestamp>.data ... (NEW) ... PDVFS_2_F_0_ID_1_RT_0 ...		
+					pdvfs_lib_log: MB Response: result.data : 
+					dsid|dirName|baseName|type|cdoRef|hashRef|mdoRef|sdoRef|status|modType|osFamily|mode|uid|gid|specialFlagsatime|mtime|ctime|size|
+					magicMimeType|extensionMimeType|alternateDestination|errorCode|errorText|applicationName|registerTime			
+					PdvfsLaunchAIRReplicate
+						WSRequestExt: action=launchAIRReplicate
+						fileNames=<BACKUP_ID>_C1_IM,<BACKUP_ID>_C1_F1,<BACKUP_ID>_C1_TIR,<BACKUP_ID>_C1_HDR
+						sourceFileNames
+						targetFileNames
+						remoteSPAURL
+						PdvfsLaunchAIRReplicate: exit OK jobId=3
+						
+	6)	impl_async_wait
+			async_get_job_status
+				PdvfsVIoctl: PDVFS_IOCTL_GET_JOB_STATE
+					WSRequestExt: action=getJobStatus&id=3
+					check_pdvfs_job: job_id:<3>, state:<QUEUED>
+				PdvfsGetJobBytesProcessed
+					WSRequestExt: action=getJobBytesProcessed&id=3
+					PdvfsGetJobBytesProcessed: Job 3 has processed 0 bytes
+			async_get_job_status: SPAD jobid:<3>, number of bytes replicated:<0>
+			async_get_job_status: status for <REMOTE_MASTER> is <RUNNING>
+			async_get_job_status: exit: status:<RUNNING> (0:OK)		
+		WAIT FOR 10 seconds	to retry ......
+		impl_async_wait
+			async_get_job_status
+				PdvfsVIoctl: PDVFS_IOCTL_GET_JOB_STATE
+					WSRequestExt: action=getJobStatus&id=3
+					check_pdvfs_job: job_id:<3>, state:<SUCCESS>
+				PdvfsGetJobBytesProcessed
+					WSRequestExt: action=getJobBytesProcessed&id=3
+					PdvfsGetJobBytesProcessed: Job 3 has processed 12627888 bytes
+			async_get_job_status: SPAD jobid:<3>, number of bytes replicated:<12627888>
+			async_get_job_status: status for <REMOTE_MASTER> is <SUCCESS>
+			async_get_job_status: exit: status:<RUNNING> (0:OK)		
+			async_finish_replication: image: <BACKUP_ID>_C1_HDR
+				air_send_replication_event
+					PdvfsCompleteAIRReplicate: Attempting to complete AIR to pjiang1-redhat-2 by sending event <client>/<policy>/EVENT_<BACKUP_ID>_<timestamp>.data
+						WSRequestExt: action=completeAIRReplicate
+							remoteSPAURL
+							name=<client>/<policy>/EVENT_<BACKUP_ID>_<timestamp>.data
+							plsize
+							PdvfsCompleteAIRReplicate: Successfully completed AIR
+				air_delete_payload_file
+					WSRequestExt: action=addlist
+					data=@POformatVersion ... <client>/<policy>/EVENT_<BACKUP_ID>_<timestamp>.data ... (DEL) ... PDVFS_2_F_0_ID_1_RT_0 ...
+					pdvfs_lib_log: MB Response: result.data : 
+					dsid|dirName|baseName|type|cdoRef|hashRef|mdoRef|sdoRef|status|modType|osFamily|mode|uid|gid|specialFlagsatime|mtime|ctime|size|
+					magicMimeType|extensionMimeType|alternateDestination|errorCode|errorText|applicationName|registerTime
+			async_cancel_image
+		impl_async_wait
+			async_get_job_status
+			async_finish_replication: image: <BACKUP_ID>_C1_TIR
+			async_cancel_image
+		impl_async_wait
+			async_get_job_status
+			async_finish_replication: image: <BACKUP_ID>_C1_F1
+			async_cancel_image
+		impl_async_wait
+			async_get_job_status
+			async_finish_replication: image: <BACKUP_ID>_C1_IM
+			async_cancel_image: last image has been cancelled
+			
+	7)	PdvfsVIoctl: PDVFS_IOCTL_GET_PERF_STATS
+		PdvfsVIoctl: PDVFS_IOCTL_SET_JOB_VARS
+		PdvfsVIoctl: PDVFS_IOCTL_CLEAR_PERF_STATS
+		
+	8)	impl_close_server
+			pd_umount
+
+--------------------------------------------------------------------------------
+
+10.	set rollback mode manually
+	/opt/pdinstall/enc_topology.sh -d /Storage/etc/topology.ini.enc
+	vi /Storage/etc/topology.ini -> dbpasswd
+	/opt/pddb/bin/psql -U pddb ca
+	insert into globalvar values(5,'globalvarrollback', 1, 0, '1311844506', '1311844506');
+--------------------------------------------------------------------------------
+
+11.	how to update storage pool id on MSDP (1114 -> 1115)
+	server side
+	1)	update config file
+		a)	/Storage/etc/puredisk/agent.cfg
+		b)	/Storage/etc/puredisk/contentrouter.cfg
+		c)	/Storage/etc/puredisk/spa.cfg, including update 1114000000 -> 1115000000
+	2)	update spaDB /Storage/databases/spa/database
+		a)	agent dir, including rename 1114000000 -> 1115000000
+		b)	spa/1 file
+		c)	contentrouter/1 file
+		d)	dataselection/1 file
+		e)	authentication/2 file
+		f)	metabaseengine dir
+		g)	storagepool dir, renaming 1114 -> 1115
+	3)	update /Storage/data/.identity
+	4)	update postgres database (crdb)
+		update counters set value=1115 where name='storagepoolid';
+	client side
+	1)	update config file, /usr/openv/lib/ost-plugins/${hostname}.cfg
+	2)	get rtdir from ${hostname}.cfg, remove ${rtdir}/1114.*
+	
+--------------------------------------------------------------------------------
+
+12.	how to remove images on corrupt MSDP
+	1)	expire images from GUI
+	2) 	/usr/openv/netbackup/bin/admincmd/nbstlutil remove_exp
+	
+	First list existing fragments:
+	nbstlutil list -U
+	nbdelete -list
+	if there are fragments, run this command:
+	/usr/openv/netbackup/bin/admincmd/nbdelete -backup_id <image fragment name> -force
+	Run this:
+	/usr/openv/netbackup/bin/admincmd/nbdelete -allvolumes -force
+	Then the diskpool can be deleted.
+	
+--------------------------------------------------------------------------------
+
+13. how to edit binary with VIM
+   a) vim -b file
+   b) :%!xxd 
+   c) :%!xxd -r
+   4) wq
+
+--------------------------------------------------------------------------------
+
+14. migrate /Storage folder to another MSDP
+	1) /Storage/data permission
+	2) .identity
+	3) .path.cnf
+	4) spooler/queue permission
+	
+--------------------------------------------------------------------------------
+
+15. use filedel -i -U <poid> <dofp> to handle storage leak in classic PD
+
+--------------------------------------------------------------------------------
+
+bpimmedia -stype PureDisk -dp <POOLNAME> > bpmedia.lst
+
+# cd <vol>:\\<STORAGE_LOCATION>\\databases\\catalog
+# dir /b /s /a-d    > MSDP_image.lst
+
+--------------------------------------------------------------------------------
+
+IDC defines a purpose-built backup appliance (PBBA) as a standalone disk-based solution that utilizes software, disk arrays, server engine(s), or nodes that are used for a target for backup data and specifically data coming from a backup application (e.g., NetWorker, NetBackup, TSM, and Backup Exec) or can be tightly integrated with the backup software to catalog, index, schedule, and perform data movement. The PBBA products are deployed in standalone configurations or as gateways. PBBA solutions deployed in a gateway configuration connect to and store backup data on general-purpose storage. Here, the gateway device is serving as the component that is purpose built solely for backup and not for supporting any other workload or application. Regardless of packaging (as an appliance or gateway), PBBAs can have multiple interfaces or protocols. Also, PBBAs often can provide and receive replication to or from remote sites and a secondary PBBA for the purpose of disaster recovery (DR). 
+
+--------------------------------------------------------------------------------
+
+/usr/sbin/parted -s /dev/<diskname> mklabel gpt
+/sbin/vxdisk init <diskname> -f
+/sbin/vxdg init <diskGroupName> <diskname> cds=off
+/usr/sbin/vxassist -g <diskGroupName> make <diskVolumeName> <volumeSize>
+/sbin/mkfs.vxfs /dev/vx/dsk/<diskGroupName>/<diskVolumeName>
+/bin/mount -t vxfs -o noatime /dev/vx/dsk/<diskGroupName>/<diskVolumeName> <mountPoint>
+or write above mount entry into fstab
+
+add '_netdev' to mount options in /etc/fstab to auto mount vxfs partition when restart
+
+--------------------------------------------------------------------------------
+
+V7.5 "operation" "set-replication" string
+V7.5 "rephostname" "sean-suse-5" string
+V7.5 "replogin" "root" string
+V7.5 "reppasswd" "root" string
+
+V7.5 "operation" "delete-replication" string
+V7.5 "rephostname" "sean-suse-5" string
+
+--------------------------------------------------------------------------------
+
+AWSAccessKeyId=AKIAJFM32ZXE2CE6GEXQ
+AWSSecretKey=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
+
+--------------------------------------------------------------------------------
+
+推荐阅读中华书局出版的《资治通鉴》文白对照版，以及《台湾史》《欧洲史》《欧洲战争简史》《亚洲战争简史》《联邦论》。
+--------------------------------------------------------------------------------
+
+telnet spw2k8r2vm2.rmnus.sen.symantec.com
+C:\build.bat U:\home06\sshan\build\B_7\dedupe -AMD64 -VS8
+C:\build.bat U:\home06\sshan\build\B_8\dedupe -AMD64 -VS8
+perl \\nbstore\tools\bin\nbbuild --plat AMD64 --jobs 4 -k -i clobber
+perl \\nbstore\tools\bin\nbbuild --plat AMD64 --jobs 4 -k -i all
+perl \\nbstore\tools\bin\nbbuild --plat AMD64 install --jobs 4 -k -i all
+.\nbbuild\scripts\post_install_win.bat U:\home06\sshan\build\B_8\dedupe \\code\smb\extsrc AMD64
+perl U:\home06\sshan\build\B_8\dedupe\wininst-pdde\pkg_windows.pl -p AMD64 -s U:\home06\sshan\build\B_8\dedupe
+
+--------------------------------------------------------------------------------
+
+
+    185     /*
+    186      * do data format |part1+part2+part3|
+    187      * part1: so[1]fp so[1]sz ... so[n]fp so[n]sz		NOTE: so[n]sz is in little-endian 
+    188      * part2: '\0'
+    189      * part3: crc + n_udcid + udcid[1]udcid[1]sz ... udcid[n]udcid[n]sz		NOTE: all fields in this part are in HOST byte order
+    190      */
+
+--------------------------------------------------------------------------------
+
+1. 下载GCC 源码包 ：   gcc-4.6.3.tar.bz2
+
+2. 下载GCC 依赖包： gmp-5.0.4.tar.bz2， mpfr-3.1.0.tar.bz2 ，mpc-0.9.tar.gz
+
+3. 解压gcc-4.6.3.tar.bz2  指令=》 [flydream@flydream opt]$ tar -xvf gcc-4.6.3.tar.bz2
+
+4. 进入[flydream@flydream opt]$ cd gcc-4.6.3
+
+5. 把下载的gmp-5.0.4.tar.bz2， mpfr-3.1.0.tar.bz2 ，mpc-0.9.tar.gz包放到gcc-4.6.3目录
+
+6. 在gcc-4.6.3目录下分别解压上面的三个包
+
+先安装gmp-5.0.4.tar.bz2
+
+进入gmp目录：cd gmp-5.0.4
+
+建立安装路径： mkdir gmp_install
+
+cd gmp_install
+
+../configure --prefix=/opt/gcc-4.6.3/gmp-5.0.4/gmp_install
+
+make 
+
+
+make install
+
+安装mpfr-3.1.0.tar.bz2
+
+进入mpfr目录
+
+
+[flydream@flydream gcc-4.6.3]$ cd mpfr-3.1.0
+
+建立安装路径： mkdir mpfr_install
+
+cd mpfr_install
+
+../configure --prefix=/opt/gcc-4.6.3/mpfr-3.1.0/mpfr_install --with-gmp=/opt/gcc-4.6.3/gmp-5.0.4/gmp_install
+
+make 
+
+
+make install
+
+
+
+
+然后安装mpc-0.9.tar.gz
+
+进入mpc
+
+建立安装路径： mkdir mpc_install
+
+cd mpc_install
+
+../configure --prefix=/opt/gcc-4.6.3/mpc-0.9/mpc_install --with-gmp=/opt/gcc-4.6.3/gmp-5.0.4/gmp_install  --with-mpfr=/opt/gcc-4.6.3/mpfr-3.1.0/mpfr_install
+
+make 
+
+
+make install
+
+
+
+
+在编译GCC的过程中可能出现“configure: error: cannot compute suffix of object files: cannot compile”的错误，解决方法是：
+
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/gcc-4.6.3/mpc-0.9/mpc_install/lib:/opt/gcc-4.6.3/gmp-5.0.4/gmp_install/lib:/opt/gcc-4.6.3/mpfr-3.1.0/mpfr_install/lib
+
+
+最后安装GCC
+
+在GCC源码目录外建立安装路径
+
+mkdir gcc_install
+
+../configure --prefix=/opt/gcc_install --with-gmp=/opt/gcc-4.6.3/gmp-5.0.4/gmp_install  --with-mpfr=/opt/gcc-4.6.3/mpfr-3.1.0/mpfr_install ----with-mpc=/opt/gcc-4.6.3/mpc-0.9/mpc_install --enable-checking=release --program-suffix=4.6.3 --enable-languages=c,c++ 
+
+
+make 
+
+
+make install
+
+注意–program-suffix参数，表示生成的可执行文件的后缀。–enable-languages参数表示要支持的语言。最后make; make install即可。make的时候还有个小技巧：因为gcc文件很多，编译很慢，可以使用make -j N参数，开启多线程编辑。其中N值可以设定为机器CPU核数x2。
+
+编译好了之后就可以使用/opt/gcc-4.6.3/bin/gcc-4.6.3来编译c程序了。为了使用方便，可以将/opt/gcc-4.6.3/bin/gcc-4.6.3/bin放到系统PATH中：
+
+
+
+
+export PATH=$PATH:/opt/gcc-4.6.3/bin/gcc-4.6.3/bin
+
+--------------------------------------------------------------------------------
+
+  260  umount ref
+  262  vxassist -g nbuapp remove volume refvol
+  265  vxmake -g nbuapp sd 5000295F080000015F5410F907-01 5000295F080000015F5410F907,0,11718901456
+  266  vxmake -g nbuapp sd 5000295F08000001745410F949-01 5000295F08000001745410F949,0,11718901456
+  268  vxmake -g nbuapp plex refvol-01 sd=5000295F080000015F5410F907-01
+  269  vxmake -g nbuapp plex stvol-01 sd=5000295F08000001745410F949-01
+  271  vxmake -g nbuapp vol refvol plex=refvol-01
+  272  vxmake -g nbuapp vol stvol plex=stvol-01
+  274  vxvol -g nbuapp start refvol
+  275  vxvol -g nbuapp start stvol
+  276  mkfs.vxfs /dev/vx/dsk/nbuapp/refvol 
+  277  mkfs.vxfs /dev/vx/dsk/nbuapp/stvol 
+  279  vim /etc/fstab 
+  278  mount ref
+  281  mount storage
+
+nb-appliance.Network> Hosts Add 10.200.168.251 i251-eng168.cdimglab.net i251-eng168
+nb-appliance.Network> DNS Add Nameserver 10.200.190.56
+nb-appliance.Network> DNS Add SearchDomain cdimglab.net
+nb-appliance.Network> DNS Domain cdimglab.net
+nb-appliance.Network> Hostname Set i251-eng168
+nb-appliance.Network> Show Configuration 
+
+
+
+
+NTP server in Chengdu: 10.200.190.57
+--------------------------------------------------------------------------------
+
+mount 10.200.190.56:/vol/builds /mnt
+
+--------------------------------------------------------------------------------
+
+1 - Make changes to /proc/sys/kernel
+
+- This setting is dynamic and no reboot is required. 
+- This is good for testing settings but will not persist after reboot
+
+echo 256 > /proc/sys/kernel/msgmni
+echo 65536 > /proc/sys/kernel/msgmax
+echo 65536 > /proc/sys/kernel/msgmnb
+echo 300 307200 64 1024 > /proc/sys/kernel/sem
+echo "1" > /proc/sys/kernel/core_uses_pid
+echo "/var/log/core.%e.%p" > /proc/sys/kernel/core_pattern
+
+
+2 - /etc/sysctl.conf 
+
+- Changing settings here makes them persistent
+
+kernel.sem = 300 307200 64 1024              
+kernel.msgmni = 256
+kernel.shmmni = 4096
+kernel.core_pattern = /var/log/core.%e.%p 
+kernel.core_uses_pid = 1
+
+Check settings with:
+
+>egrep "kernel.sem|kernel.msg|kernel.shm|core_p|core_u" /etc/sysctl.conf  
+kernel.sem = 300 307200 64 1024              
+kernel.msgmnb = 65536
+kernel.msgmni = 256
+kernel.msgmax = 65536
+kernel.shmmni = 4096
+kernel.shmall = 4294967296
+kernel.shmmax = 68719476736
+kernel.core_pattern = /var/log/core.%e.%p
+kernel.core_uses_pid = 1
+<!--[if !supportLineBreakNewLine]--> <!--[endif]-->
+
+3 - /etc/security/limits.conf
+
+add lines:
+
+*               soft    core           unlimited
+*               hard    core           unlimited
+*               soft    nofile         8192
+*               hard    nofile         63535
+
+NOTE:
+Making changes to /etc/security/limits.conf file does not change the ulimit values for the currently running NetBackup daemons if they were started by the init scripts in /etc/init.d. The ulimit changes will take affect once NetBackup daemons are restarted from the root shell.
+
+
+4- /etc/pam.d/login
+
+add line:
+
+session    required     /lib/security/pam_limits.so
+
+
+5 - /etc/profile
+
+add line:
+
+ulimit -S -c unlimited > /dev/null 2>&1 ulimit -aH
+
+
+Confirm settings after login with:
+
+>ulimit -aH
+
+core file size          (blocks, -c) unlimited
+data seg size           (kbytes, -d) unlimited
+max nice                        (-e) 0
+file size               (blocks, -f) unlimited
+pending signals                 (-i) 137215
+max locked memory       (kbytes, -l) 32
+max memory size         (kbytes, -m) unlimited
+open files                      (-n) 63535
+pipe size            (512 bytes, -p) 8
+POSIX message queues     (bytes, -q) 819200
+max rt priority                 (-r) 0
+stack size              (kbytes, -s) unlimited
+cpu time               (seconds, -t) unlimited
+max user processes              (-u) 137215
+virtual memory          (kbytes, -v) unlimited
+file locks                      (-x) unlimited
+
+
+See Also: 3rd party guide to tuning 10Gb network cards on Linux
+
+Tuning 10Gb network cards on Linux
+http://www.kernel.org/doc/ols/2009/ols2009-pages-169-184.pdf
+
+--------------------------------------------------------------------------------
+evaluate appliance
+
+/opt/Symantec/scspagent/IPS/sisipsoverride.sh
+--------------------------------------------------------------------------------
+
+Testing the network performance 
+
+From the listener/target side on the port 5000: 
+/usr/openv/netbackup/bin/support/nbperfchk -o null: -i tcp::5000
+From the sender/source side: 28
+
+/usr/openv/netbackup/bin/support/nbperfchk -i zero: -o tcp:<listener server name>:5000 -s 10g -nr 
+Note: If you want to see the report when the command progresses, remove
+
+Another tool iperf,
+
+Server side:
+/home/maintenance/bin/iperf –P 4 –s
+
+Client side:
+/home/maintenance/bin/iperf –c app5330j –P 6
+
+
+--------------------------------------------------------------------------------
+Leon Zhang [1:56 PM]: 
+/opt/iozone/bin/iozone -R -24 5 -u 24 -r 128k -s 30g –F `cat /root/leon/dv.lst` |tee -a /tmp/iozone_results.txt 
+Leon Zhang [2:00 PM]: 
+/opt/iozone/bin/iozone -R -24 5 -u 24 -a -i 0 –F `cat /root/leon/dv.lst` |tee -a /tmp/iozone_results.txt 
+Leon Zhang [2:14 PM]: 
+/opt/iozone/bin/iozone -R -l 24 -u 24 -r 128k -s 30g –F `cat /root/leon/dv.lst` |tee -a /tmp/iozone_results.txt 
+/opt/iozone/bin/iozone -R -l 24 -u 24 -r 128k -s 30g –F `cat /root/leon/dv.lst` |tee -a /tmp/iozone_results.txt
+/opt/iozone/bin/iozone -R -l 24 -u 24 -r 128k -s 30g –F `cat /root/leon/dv.lst` |tee -a /tmp/iozone_results.txt
+
+
+
+--------------------------------------------------------------------------------
+ RMNTERMSRV.rmnus.sen.symantec.com
+
+ win2k8-zitablvm
+ 
+ appliance installation ACF site:
+ http://nbapppxe.engba.symantec.com/acf/configureiso.html
+ OC: internal server: tusocsep1.SYMANTEC.COM
+ 
+ Gyp.s8m
+ Lol.it3
+ Engit123!
+ Bix.bit3	Bix.bit2
+ 
+ root/P@ssw0rd
+ sysadmin/P@ssw0rd
+ 
+ vCenter 5.5:  	31025-0E110-08R4W-040KP-0W5Q4
+ ESXi 5.5: 		QH0C7-08G9H-M8R48-0V3UQ-JEX64
+
+--------------------------------------------------------------------------------
+ROS lab:
+
+DNS	
+	10.80.120.21/22	
+	rmnus.sen.symantec.com
+
+NTPServer
+	zebra.rmnus.sen.symantec.com
+
+DHCP
+
+zitabl12/zitabl13	root/Bix.bit3	(vmware ESXi)
+zitabl15/zitabl16	root/Bix.bit2	(vmware ESXi)
+
+vcenter:
+zitabl15vm20.rmnus.sen.symantec.com		on zitabl15
+	10.80.135.20/255.255.248.0		10.80.128.1
+	Administrator@vSphere.local/Bix.bit2
+
+stpnbu5230a.rmnus.sen.symantec.com	
+	10.80.129.50/255.255.248.0		10.80.128.1
+stpnbu5230c.rmnus.sen.symantec.com	
+	10.80.129.222/255.255.248.0		10.80.128.1
+
+lexibl6.rmnus.sen.symantec.com		root/Gyp.s8m	(master server)
+	10.80.153.91/255.255.248.0		10.80.152.1
+lexibl14.rmnus.sen.symantec.com		root/Gyp.s8m	(vmware ESXi)
+	10.80.154.4/255.255.248.0		10.80.152.1
+lexibl15.rmnus.sen.symantec.com		root/Gyp.s8m	(vmware ESXi)	
+	10.80.154.5/255.255.248.0		10.80.152.1
+
+app5330j.rmnus.sen.symantec.com
+	10.80.88.163/255.255.248.0		10.80.88.1
+app5330k.rmnus.sen.symantec.com
+	10.80.153.196/255.255.248.0		10.80.152.1
+	
+IPMI: ${hostname}console
+	
+==========================================================
+
+MTV lab:
+
+DNS
+	155.64.67/70
+	155.64.1.254
+	engba.symantec.com
+
+nbur420-105.engba.symantec.com		root/P@ssw0rd	(vmware ESXi)
+	10.132.5.84/255.255.248.0		10.132.0.1
+	vm:	nbur420-105vm01 - nbur420-105vm20
+		10.132.5.117	- 10.132.5.136
+
+nbapp293.engba.symantec.com
+	10.132.5.67/255.255.248.0		10.132.0.1
+nbapp2ds.engba.symantec.com
+	10.132.1.47/255.255.248.0		10.132.0.1
+
+vcenter
+nbur420-105vm20.engba.symantec.com	on nbur420-105
+	10.132.5.136/255.255.248.0		10.132.0.1
+	Administrator@vSphere.local/P@ssw0rd
+
+IPMI: $hostname-nm
+	
+============================================================
+
+CD lab:
+
+DNS
+	10.200.190.56
+	143.127.251.16
+	cdimglab.net
+
+i204-eng172.cdimglab.net			root/root	(master server)
+	10.200.172.204/255.255.255.0	10.200.172.1
+
+i231-eng172.cdimglab.net
+	10.200.172.231/255.255.255.0	10.200.172.1
+	IPMI:10.200.172.241
+i232-eng172.cdimglab.net
+	10.200.172.232/255.255.255.0	10.200.172.1
+	IPMI:10.200.172.242
+	
+
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
